@@ -1,0 +1,218 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Agri Planning</title>
+  <!-- Leaflet CSS pour la carte -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <style>
+    :root {
+      --primary-green: #4caf50;
+      --secondary-brown: #8d6e63;
+      --background: #f9fbe7;
+      --card-bg: #ffffff;
+      --text-color: #333333;
+      --hover: #e8f5e9;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; padding:0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--background); color: var(--text-color); }
+    header { background: var(--primary-green); color: white; padding: 15px; position: relative; display: none; }
+    nav { display: none; background: var(--card-bg); padding: 10px; border-bottom: 2px solid var(--secondary-brown); justify-content: space-around; align-items: center; }
+    nav a { text-decoration: none; color: var(--secondary-brown); font-weight: bold; margin: 0 5px; cursor: pointer; }
+    nav a.active, nav a:hover { color: var(--primary-green); }
+    section { display: none; padding: 20px; }
+    section.active { display: block; }
+    button, input, select, textarea { margin: 8px 0; padding: 10px; width: 100%; border: 1px solid var(--secondary-brown); border-radius: 5px; font-size: 1rem; }
+    button { background: var(--primary-green); color: white; border: none; cursor: pointer; }
+    button:hover { background: var(--secondary-brown); }
+    #dashboard .task { background: var(--card-bg); padding: 10px; margin: 5px 0; border-left: 4px solid var(--primary-green); }
+    .calendar { display: grid; grid-template-columns: repeat(7,1fr); gap: 5px; }
+    .day { min-height: 120px; padding: 5px; border: 1px dashed var(--secondary-brown); background: var(--card-bg); }
+    .day:hover { background: var(--hover); }
+    .day .task { background: var(--background); margin: 5px 0; padding: 5px; border: 1px solid var(--secondary-brown); border-radius: 3px; cursor: grab; }
+    #leafletMap { height: 400px; width: 100%; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+  </style>
+</head>
+<body>
+  <!-- LOGIN -->
+  <section id="login" class="active" style="text-align:center;">
+    <h1>Bienvenue sur Agri Planning</h1>
+    <p>Sélectionnez votre rôle :</p>
+    <select id="roleSelect">
+      <option value="">-- Choisir un rôle --</option>
+      <option value="exploitant">Exploitant</option>
+      <option value="employe">Employé</option>
+    </select>
+    <button id="enterBtn">Entrer</button>
+  </section>
+
+  <!-- HEADER & NAV -->
+  <header>
+    <h1>Agri Planning</h1>
+    <div style="position:absolute; top:15px; right:15px; color:white;">Rôle : <span id="roleDisplay"></span></div>
+  </header>
+  <nav>
+    <a data-sec="dashboard" class="active">Tableau de bord</a>
+    <a data-sec="planning">Planning</a>
+    <a data-sec="create">Créer tâche</a>
+    <a data-sec="map">Carte</a>
+    <a data-sec="chat">Chat</a>
+  </nav>
+
+  <!-- DASHBOARD -->
+  <section id="dashboard">
+    <h2>Tableau de bord</h2>
+    <h3>Tâches d'aujourd'hui</h3>
+    <div id="todayTasks"></div>
+  </section>
+
+  <!-- PLANNING -->
+  <section id="planning">
+    <h2>Planning de la semaine</h2>
+    <label>Choisir date :</label>
+    <input type="date" id="datePicker" />
+    <div id="calendar" class="calendar"></div>
+  </section>
+
+  <!-- CREATE TASK -->
+  <section id="create">
+    <h2>Créer une tâche</h2>
+    <input type="text" id="taskTitle" placeholder="Titre tâche" />
+    <input type="date" id="taskDate" />
+    <select id="taskCategory">
+      <option value="vache">🐄 Vache</option>
+      <option value="cochon">🐖 Cochon</option>
+      <option value="champs">🌽 Champs</option>
+      <option value="autre">🛠️ Autre</option>
+    </select>
+    <label>Récurrence :</label>
+    <select id="taskRecurrence">
+      <option value="none">Aucune</option>
+      <option value="daily">Quotidienne</option>
+      <option value="weekly">Hebdomadaire</option>
+    </select>
+    <textarea id="taskNotes" placeholder="Notes"></textarea>
+    <button id="saveTask">Enregistrer</button>
+  </section>
+
+  <!-- MAP -->
+  <section id="map">
+    <h2>Carte interactive (Satellite Google)</h2>
+    <div id="leafletMap"></div>
+    <p>Cliquer pour ajouter un champ et un commentaire. Cliquer sur un marqueur pour le supprimer.</p>
+  </section>
+
+  <!-- CHAT -->
+  <section id="chat">
+    <h2>Chat</h2>
+    <div id="chatWindow" style="height:200px; overflow:auto; background:var(--card-bg); padding:10px;"></div>
+    <input type="text" id="chatInput" placeholder="Écrire un message" />
+    <button id="chatSend">Envoyer</button>
+  </section>
+
+  <!-- Scripts -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    // Navigation entre sections
+    const sections = ['dashboard','planning','create','map','chat'];
+    document.querySelectorAll('nav a').forEach(link => link.addEventListener('click', () => {
+      document.querySelectorAll('nav a').forEach(x => x.classList.remove('active'));
+      link.classList.add('active');
+      sections.forEach(s => document.getElementById(s).classList.remove('active'));
+      document.getElementById(link.dataset.sec).classList.add('active');
+      if(link.dataset.sec==='map' && window.myMap) window.myMap.invalidateSize();
+    }));
+
+    // Fonction de démarrage
+    function startApp(role) {
+      document.getElementById('login').style.display = 'none';
+      document.querySelector('header').style.display = 'block';
+      document.querySelector('nav').style.display = 'flex';
+      document.getElementById('dashboard').classList.add('active');
+      document.getElementById('roleDisplay').textContent = role === 'exploitant' ? 'Exploitant' : 'Employé';
+      renderToday(); initPlanning(); initCreate(); initMap(); initChat();
+    }
+
+    // Login
+    document.getElementById('enterBtn').addEventListener('click', () => {
+      const role = document.getElementById('roleSelect').value;
+      if (!role) return alert('Veuillez choisir un rôle');
+      startApp(role);
+    });
+    // Auto-login
+    (function() {
+      const r = localStorage.getItem('userRole'); if (r) startApp(r);
+    })();
+
+    // Dashboard
+    function renderToday() {
+      const todayKey = new Date().toISOString().split('T')[0];
+      const cont = document.getElementById('todayTasks'); cont.innerHTML = '';
+      JSON.parse(localStorage.getItem('tasks')||'[]')
+        .filter(t => t.date === todayKey)
+        .forEach(t => { const el = document.createElement('div'); el.className = 'task'; el.textContent = t.title; cont.appendChild(el); });
+    }
+
+    // Planning
+    function getMonday(d) { d = new Date(d); const day = d.getDay(), diff = d.getDate() - day + (day === 0 ? -6 : 1); return new Date(d.setDate(diff)); }
+    function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate()+n); return x; }
+    function formatDate(d) { return d.toLocaleDateString('fr-FR'); }
+
+    function initPlanning() {
+      const dp = document.getElementById('datePicker'); dp.valueAsDate = new Date();
+      dp.addEventListener('change', () => renderCalendar(dp.value)); renderCalendar(new Date());
+    }
+    function renderCalendar(base) {
+      const mon = getMonday(base), cal = document.getElementById('calendar'); cal.innerHTML = '';
+      const tasks = JSON.parse(localStorage.getItem('tasks')||'[]');
+      for (let i = 0; i < 7; i++) {
+        const day = addDays(mon, i), cell = document.createElement('div');
+        cell.className = 'day'; cell.textContent = formatDate(day);
+        cell.addEventListener('dragover', e => e.preventDefault());
+        cell.addEventListener('drop', e => {
+          const idx = e.dataTransfer.getData('text'); tasks[idx].date = day.toISOString().split('T')[0];
+          localStorage.setItem('tasks', JSON.stringify(tasks)); renderCalendar(base); renderToday();
+        });
+        tasks.forEach((t,j) => { if (t.date===day.toISOString().split('T')[0]) { const d= document.createElement('div'); d.className='task'; d.textContent=t.title; d.draggable=true; d.addEventListener('dragstart', ev => ev.dataTransfer.setData('text', j)); cell.appendChild(d); }});
+        cal.appendChild(cell);
+      }
+    }
+
+    // Create task
+    function initCreate() {
+      const dateField = document.getElementById('taskDate'); if (dateField) dateField.valueAsDate = new Date();
+      document.getElementById('saveTask').addEventListener('click', () => {
+        const title = document.getElementById('taskTitle').value.trim(); const date = document.getElementById('taskDate').value;
+        const cat = document.getElementById('taskCategory').value; const rec = document.getElementById('taskRecurrence').value;
+        const notes = document.getElementById('taskNotes').value.trim();
+        if (!title||!date) return alert('Titre et date obligatoires');
+        const tasks = JSON.parse(localStorage.getItem('tasks')||'[]'); tasks.push({title,date,category:cat,notes,done:false,recurrence:rec});
+        localStorage.setItem('tasks', JSON.stringify(tasks)); document.querySelector('nav a[data-sec="planning"]').click(); renderToday(); renderCalendar(date);
+      });
+    }
+
+    // Map with removal
+    function initMap() {
+      const map = L.map('leafletMap').setView([48.5712, -4.4180], 16); window.myMap = map;
+      L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { subdomains:['mt0','mt1','mt2','mt3'] }).addTo(map);
+      map.on('click', e => {
+        const comment = prompt('Commentaire pour ce point ?');
+        if (comment !== null) {
+          const marker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map).bindPopup(comment || 'Pas de commentaire');
+          marker.on('click', () => map.removeLayer(marker));
+        }
+      });
+    }
+
+    // Chat
+    function initChat() {
+      document.getElementById('chatSend').addEventListener('click', () => {
+        const msg = document.getElementById('chatInput').value.trim(); if (!msg) return;
+        const win = document.getElementById('chatWindow'); const p = document.createElement('p'); p.textContent = msg; win.appendChild(p);
+        document.getElementById('chatInput').value = ''; win.scrollTop = win.scrollHeight;
+      });
+    }
+  </script>
+</body>
+</html>
